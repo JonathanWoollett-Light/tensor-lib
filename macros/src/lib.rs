@@ -142,8 +142,91 @@ pub fn tensors(item: TokenStream) -> TokenStream {
             out.push_str(&alias_string);
 
             // Implementations
-            standard_impl(&mut out, i, &form, &type_info,"-","Sub","sub");
-            standard_impl(&mut out, i, &form, &type_info,"+","Add","add");
+            // --------------------------------------
+            // From
+            from(&mut out, i, &form, &type_info);
+            // Basic ops
+            standard_impl(&mut out, i, &form, &type_info, "+", "Add", "add");
+            standard_impl(&mut out, i, &form, &type_info, "-", "Sub", "sub");
+            standard_impl(&mut out, i, &form, &type_info, "*", "Mul", "mul");
+            standard_impl(&mut out, i, &form, &type_info, "/", "Div", "div");
+            standard_impl(&mut out, i, &form, &type_info, "|", "BitOr", "bitor");
+            standard_impl(&mut out, i, &form, &type_info, "&", "BitAnd", "bitand");
+            standard_impl(&mut out, i, &form, &type_info, "^", "BitXor", "bitxor");
+            standard_impl(&mut out, i, &form, &type_info, "%", "Rem", "rem");
+            // Assign ops
+            assign_impl(
+                &mut out,
+                i,
+                &form,
+                &type_info,
+                "+=",
+                "AddAssign",
+                "add_assign",
+            );
+            assign_impl(
+                &mut out,
+                i,
+                &form,
+                &type_info,
+                "-=",
+                "SubAssign",
+                "sub_assign",
+            );
+            assign_impl(
+                &mut out,
+                i,
+                &form,
+                &type_info,
+                "*=",
+                "MulAssign",
+                "mul_assign",
+            );
+            assign_impl(
+                &mut out,
+                i,
+                &form,
+                &type_info,
+                "/=",
+                "DivAssign",
+                "div_assign",
+            );
+            assign_impl(
+                &mut out,
+                i,
+                &form,
+                &type_info,
+                "|=",
+                "BitOrAssign",
+                "bitor_assign",
+            );
+            assign_impl(
+                &mut out,
+                i,
+                &form,
+                &type_info,
+                "&=",
+                "BitAndAssign",
+                "bitand_assign",
+            );
+            assign_impl(
+                &mut out,
+                i,
+                &form,
+                &type_info,
+                "^=",
+                "BitXorAssign",
+                "bitxor_assign",
+            );
+            assign_impl(
+                &mut out,
+                i,
+                &form,
+                &type_info,
+                "%=",
+                "RemAssign",
+                "rem_assign",
+            );
         }
     }
 
@@ -151,11 +234,163 @@ pub fn tensors(item: TokenStream) -> TokenStream {
     // --------------------------------------------------------
     out.parse().unwrap()
 }
+/// Shared functionality for some similar operations (e.g. `std::ops::SubAssign`, `std::ops::AddAssign`).
+fn from(
+    output_string: &mut String,
+    // The number of dimensions of the tensors involved in the operation.
+    ndims: usize,
+    // A slice of length `ndims` defining whether each dimension is static (`true`) or dynamic (`false`).
+    self_dimensionality_form: &[bool],
+    self_partial_type_suffix: &str,
+) {
+    let (static_idents, dynamic_idents) = self_dimensionality_form
+        .iter()
+        .enumerate()
+        .map(|(v, x)| {
+            if *x {
+                ((v as u8 + 65) as char, *x)
+            } else {
+                ((v as u8 + 97) as char, *x)
+            }
+        })
+        .partition::<Vec<_>, _>(|(_, x)| *x);
+    let (static_idents, dynamic_idents) = (
+        static_idents
+            .into_iter()
+            .map(|(v, _)| v)
+            .collect::<Vec<_>>(),
+        dynamic_idents
+            .into_iter()
+            .map(|(v, _)| v)
+            .collect::<Vec<_>>(),
+    );
 
-/// Shared functionality for some similar operations (e.g. `std::ops::Sub`, `std::ops::Add`)
+    // Our full implementation block
+    let impl_block = format!(
+        "
+        impl<T{}> From<({}Vec<T>)> for Tensor{ndims}{self_partial_type_suffix} {{
+            fn from(({}data):({}Vec<T>)) -> Self {{
+                assert_eq!({},data.len());
+                Self {{ {}data }}
+            }}
+        }}
+        ",
+        static_idents
+            .iter()
+            .map(|v| format!(",const {}:usize", v))
+            .collect::<String>(),
+        "usize,".repeat(dynamic_idents.len()),
+        dynamic_idents
+            .iter()
+            .map(|v| format!("{},", v))
+            .collect::<String>(),
+        "usize,".repeat(dynamic_idents.len()),
+        static_idents
+            .iter()
+            .chain(dynamic_idents.iter())
+            .intersperse(&'*')
+            .collect::<String>(),
+        dynamic_idents
+            .iter()
+            .map(|v| format!("{},", v))
+            .collect::<String>(),
+    );
+    output_string.push_str(&impl_block);
+}
+
+/// Shared functionality for some similar operations (e.g. `std::ops::SubAssign`, `std::ops::AddAssign`).
+fn assign_impl(
+    output_string: &mut String,
+    // The number of dimensions of the tensors involved in the operation.
+    ndims: usize,
+    // A slice of length `ndims` defining whether each dimension is static (`true`) or dynamic (`false`).
+    self_dimensionality_form: &[bool],
+    self_partial_type_suffix: &str,
+    op: &str,
+    op_trait: &str,
+    op_fn: &str,
+) {
+    for impl_form in (0..ndims).map(|_| (0..2)).multi_cartesian_product() {
+        let impl_form = impl_form.into_iter().map(|x| x != 0).collect::<Vec<_>>();
+        // Defines whether each dimension in our output is static or not
+        let join = self_dimensionality_form
+            .iter()
+            .zip(impl_form.iter())
+            .map(|(a, b)| *a || *b)
+            .collect::<Vec<_>>();
+        // Getting the suffix for our rhs tensor based off whether each dimensions is static or not
+        let impl_static_dimensions = impl_form
+            .iter()
+            .map(|x| if *x { 'S' } else { 'D' })
+            .intersperse(SDS)
+            .collect::<String>();
+        // Getting the const generics for our rhs tensor based off whether each dimension is static or not
+        let rhs_const_generics = impl_form
+            .iter()
+            .enumerate()
+            .filter_map(|(v, x)| {
+                if *x {
+                    Some(format!(",{}", (v as u8 + 65) as char))
+                } else {
+                    None
+                }
+            })
+            .collect::<String>();
+        // Gets all const generics definitions needed for `self` and `Rhs`
+        let joined_const_generics = join
+            .iter()
+            .enumerate()
+            .filter_map(|(v, x)| {
+                if *x {
+                    Some(format!(", const {}: usize", (v as u8 + 65) as char))
+                } else {
+                    None
+                }
+            })
+            .collect::<String>();
+        // Type definition for `rhs`
+        let rhs_definition = format!("{}<T{}>", impl_static_dimensions, rhs_const_generics);
+
+        let dimension_length_checks = (0..26).take(ndims).filter_map(|d|
+            // If both dimensions are static we don't need to check
+            if self_dimensionality_form[d] && impl_form[d] {
+                None
+            }
+            // If one or both our input tensors are dynamic in a dimension we need to check their lengths
+            else if self_dimensionality_form[d] {
+                Some(format!("{}({},rhs.{},\"Dimension {} of the given tensors doesn't match\");",ASSERT_EQ,(d as u8+65) as char,(d as u8+97) as char,d))
+            }
+            else if impl_form[d] {
+                Some(format!("{}(self.{},{},\"Dimension {} of the given tensors doesn't match\");",ASSERT_EQ,(d as u8+97) as char,(d as u8+65) as char,d))
+            }
+            else {
+                Some(format!("{}(self.{},rhs.{},\"Dimension {} of the given tensors doesn't match\");",ASSERT_EQ,(d as u8+97) as char,(d as u8+97) as char,d))
+            }
+        ).collect::<String>();
+
+        // Our full implementation block
+        let impl_block = format!(
+            "
+            impl<T: Default + Copy + std::ops::{op_trait}{joined_const_generics}> std::ops::{op_trait}<Tensor{ndims}{rhs_definition}> for Tensor{ndims}{} {{
+                fn {op_fn}(&mut self, rhs: Tensor{ndims}{rhs_definition}) {{
+                    {dimension_length_checks}
+                    for (a,b) in self.data.iter_mut().zip(rhs.data.iter()) {{
+                        *a {op} *b;
+                    }}
+                }}
+            }}
+            ",
+            // Type definition for `self`
+            self_partial_type_suffix,
+        );
+        output_string.push_str(&impl_block);
+    }
+}
+
+/// Shared functionality for some similar operations (e.g. `std::ops::Sub`, `std::ops::Add`).
 fn standard_impl(
     output_string: &mut String,
-    // The number of dimensions of the tensors involved in the operation
+    // The number of dimensions of the tensors involved in the operation.
     ndims: usize,
     // A slice of length `ndims` defining whether each dimension is static (`true`) or dynamic (`false`).
     self_dimensionality_form: &[bool],
