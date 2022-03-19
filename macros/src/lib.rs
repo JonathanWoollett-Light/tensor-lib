@@ -20,11 +20,27 @@ use itertools::Itertools;
 // MatrixDD<T> = Tensor2DD<T>
 // ...
 
-/// Static dimension separator
-const SDS: char = 'x';
+/// Static dimension separator.
+const SDS: &str = "x";
+/// Static dimension static tag.
+const SDST: &str = "S";
+/// Static dimension dynamic tag.
+const SDDT: &str = "D";
+
+const RANGE_SUFFIX: &str = "_range";
 
 /// Use this to avoid noise from `assert_eq!` expansion.
 const ASSERT_EQ: &str = "assert_eq!";
+const LOWERCASE_OFFSET: u8 = 97;
+const UPPERCASE_OFFSET: u8 = 65;
+// Converts integer in range 0..27 to a lowercase letter (e.g. 1->b).
+fn lowercase(x: usize) -> char {
+    (x as u8 + LOWERCASE_OFFSET) as char
+}
+// Converts integer in range 0..27 to an uppercase letter (e.g. 1->B).
+fn uppercase(x: usize) -> char {
+    (x as u8 + UPPERCASE_OFFSET) as char
+}
 
 #[proc_macro]
 pub fn tensors(item: TokenStream) -> TokenStream {
@@ -40,20 +56,21 @@ pub fn tensors(item: TokenStream) -> TokenStream {
     );
 
     let mut out = String::new();
-    // Tensor definitions
-    // --------------------------------------------------------
+    blas(&mut out);
+    // For each dimension
     for i in 1..dimensions + 1 {
-        // For all tensors of `i` dimensionality.
+        // For all permutations of dynamic & static tensors of `i` dimensionality.
         for form in (0..i).map(|_| (0..2)).multi_cartesian_product() {
+            // Convert form to boolean (1->true, 0->false).
+            let form = bool_vec(form);
             // Definition
             // --------------------------------------
             let mut layout = (
-                format!("pub struct Tensor{}", i.to_string()),
+                format!("pub struct Tensor{}", i),
                 vec![char::default(); i],
                 vec![None; i],
                 vec![None; i],
             );
-            let form = form.into_iter().map(|x| x != 0).collect::<Vec<_>>();
 
             // For each dimension
             for c in (0..26).take(i) {
@@ -67,47 +84,67 @@ pub fn tensors(item: TokenStream) -> TokenStream {
             }
 
             // The dimensions description used in rustdoc
-            let rustdoc_dims = layout
-                .2
+            let rustdoc_dims = form
                 .iter()
-                .map(|x| match x {
-                    Some(_) => "static",
-                    None => "dynamic",
-                })
+                .map(|b| if *b { "static" } else { "dynamic" })
                 .intersperse(", ")
                 .collect::<String>();
 
             // The static dimensions identifiers appended to the struct identifier.
-            let static_dimensions = layout.1.iter().intersperse(&SDS).collect::<String>();
+            let static_dimensions = form
+                .iter()
+                .map(|b| if *b { SDST } else { SDDT })
+                .intersperse(SDS)
+                .collect::<String>();
 
             // The static dimension const generics.
-            let const_generics = layout
-                .2
+            let const_generics = form
                 .iter()
-                .filter_map(|x| *x)
-                .map(|x| format!(",const {}: usize", x))
+                .enumerate()
+                // Filter for only the static dimensions
+                .filter(|(_, b)| **b)
+                .map(|(v, _)| format!(", const {}: usize", uppercase(v)))
                 .collect::<String>();
 
             // The dynamic dimensions struct values.
-            let dynamic_dimensions = layout.3.into_iter().filter_map(|x| x).collect::<String>();
+            let dynamic_dimensions = form
+                .iter()
+                .enumerate()
+                // Filter for only the dynamic dimensions
+                .filter(|(_, b)| !**b)
+                .map(|(v, _)| format!("pub {}: usize,", lowercase(v)))
+                .collect::<String>();
 
             let type_info_t = format!("{}<T{}>", static_dimensions, const_generics);
             let type_info = format!(
                 "{}<T{}>",
                 static_dimensions,
-                layout
-                    .2
-                    .iter()
-                    .map(|x| match x {
-                        Some(x) => format!(",{}", x),
-                        None => String::from(""),
-                    })
+                form.iter()
+                    .enumerate()
+                    // Filter for only the static dimensions
+                    .filter(|(_, b)| **b)
+                    .map(|(v, _)| format!(",{}", uppercase(v)))
                     .collect::<String>()
             );
+
+            let mut features = if i <= 3 {
+                String::from("feature=\"default\",")
+            } else {
+                String::new()
+            };
+            features.push_str(
+                &(i..=dimensions)
+                    .map(|v| format!("feature=\"d{v}\""))
+                    .intersperse(String::from(","))
+                    .collect::<String>(),
+            );
+
             // The potential alias for this tensor.
             let alias_string = if i == 1 {
                 format!(
                     "
+                    #[cfg(feature=\"d1\")]
+                    #[doc(cfg(any({features})))]
                     #[doc=\"An alias for a `[{}]` 1 dimensional tensor.\"]
                     pub type Vector{} = Tensor1{};",
                     rustdoc_dims, type_info_t, type_info
@@ -115,6 +152,8 @@ pub fn tensors(item: TokenStream) -> TokenStream {
             } else if i == 2 {
                 format!(
                     "
+                    #[cfg(feature=\"d2\")]
+                    #[doc(cfg(any({features})))]
                     #[doc=\"An alias for a `[{}]` 2 dimensional tensor.\"]
                     pub type Matrix{} = Tensor2{};
                     ",
@@ -125,13 +164,30 @@ pub fn tensors(item: TokenStream) -> TokenStream {
             };
 
             // The full struct definition.
+            // #[derive(Eq,PartialEq,Debug,Clone)]
             #[allow(unstable_name_collisions)]
             let struct_string = format!(
                 "
-                #[doc=\"A {} dimensional tensor with `[{}]` dimensions.\"]
-                {}{}<T{}>{{ pub data: Vec<T>, {} }}
+                #[cfg(feature = \"d{i}\")]
+                #[doc(cfg(any({features})))]
+                #[doc=\"{i}d tensor with `[{rustdoc_dims}]` dimensions.\n\n`self.data` contains the underlying data.\n\nIf present the properties `a`, `b`, `c`, etc. represent the lengths of dimensions `0`, `1`, `2`, etc.\"]
+                #[derive(Eq,PartialEq,Debug,Clone)]
+                pub struct Tensor{i}{static_dimensions}<T{const_generics}>{{ pub data: Vec<T>, {dynamic_dimensions} }}
+                impl<T{const_generics}> Tensor{i}{type_info}{{
+                    pub fn iter(&self) -> impl Iterator<Item=&T> {{
+                        self.data.iter()
+                    }}
+                    pub fn iter_mut(&mut self) -> impl Iterator<Item=&mut T> {{
+                        self.data.iter_mut()
+                    }}
+                    pub fn len(&self) -> usize {{
+                        self.data.len()
+                    }}
+                    pub fn is_empty(&self) -> bool {{
+                        self.data.is_empty()
+                    }}
+                }}
                 ",
-                i, rustdoc_dims, layout.0, static_dimensions, const_generics, dynamic_dimensions,
             );
 
             // We push the struct definition.
@@ -141,10 +197,60 @@ pub fn tensors(item: TokenStream) -> TokenStream {
             // We push the alias string.
             out.push_str(&alias_string);
 
+            // Slicing trait
+            // --------------------------------------
+            // Create slicing trait for this permutation output
+            let const_slice_ranges = form
+                .iter()
+                .enumerate()
+                // Filter for only the static dimensions
+                .filter(|(_, b)| **b)
+                .map(|(v, _)| {
+                    format!(
+                        "const {}{RANGE_SUFFIX}: std::ops::Range<usize>",
+                        uppercase(v)
+                    )
+                })
+                .intersperse(String::from(","))
+                .collect::<String>();
+            let dynamic_slice_ranges = form
+                .iter()
+                .enumerate()
+                // Filter for only the dynamic dimensions
+                .filter(|(_, b)| !**b)
+                .map(|(v, _)| format!(",{}{RANGE_SUFFIX}: std::ops::Range<usize>", lowercase(v)))
+                .collect::<String>();
+            let const_slice_sizes = form
+                .iter()
+                .enumerate()
+                // Filter for only the static dimensions
+                .filter(|(_, b)| **b)
+                .map(|(v, _)| format!(",{{range_len({}{RANGE_SUFFIX})}}", uppercase(v)))
+                .collect::<String>();
+            let slice_trait_str = format!(
+                "
+                #[cfg(feature = \"d{i}\")]
+                #[doc(cfg(any({features})))]
+                #[doc=\"Support for slicing a {i}d tensor by `[{rustdoc_dims}]` ranges.\"]
+                pub trait Slice{i}{static_dimensions}<T> {{
+                    fn slice<{const_slice_ranges}>(&self{dynamic_slice_ranges}) -> Tensor{i}{static_dimensions}<&T{const_slice_sizes}>;
+                }}
+                "
+            );
+            // We push our slice trait
+            out.push_str(&slice_trait_str);
+
             // Implementations
             // --------------------------------------
+            // Display
+            display_impl(&mut out, i, &form, &type_info);
             // From
             from(&mut out, i, &form, &type_info);
+            from_distribution(&mut out, i, &form, &type_info);
+            // Index
+            // Slicing
+            slice_impl(&mut out, i, &form, &static_dimensions, &const_generics);
+            index(&mut out, i, &form, &type_info);
             // Basic ops
             standard_impl(&mut out, i, &form, &type_info, "+", "Add", "add");
             standard_impl(&mut out, i, &form, &type_info, "-", "Sub", "sub");
@@ -234,7 +340,322 @@ pub fn tensors(item: TokenStream) -> TokenStream {
     // --------------------------------------------------------
     out.parse().unwrap()
 }
-/// Shared functionality for some similar operations (e.g. `std::ops::SubAssign`, `std::ops::AddAssign`).
+/// Converts a vector of `0` and `1` into a vector of `false` and `true` (respectively).
+fn bool_vec(x: Vec<u8>) -> Vec<bool> {
+    x.into_iter().map(|x| x != 0).collect()
+}
+fn display_impl(
+    output_string: &mut String,
+    // The number of dimensions of the tensors involved in the operation.
+    ndims: usize,
+    // A slice of length `ndims` defining whether each dimension is static (`true`) or dynamic (`false`).
+    self_dimensionality_form: &[bool],
+    self_partial_type_suffix: &str,
+) {
+    // [A, b, C, D, ...]
+    let idents = self_dimensionality_form
+        .iter()
+        .enumerate()
+        .map(|(v, x)| {
+            if *x {
+                (uppercase(v), *x)
+            } else {
+                (lowercase(v), *x)
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let (static_idents, _) = idents.iter().cloned().partition::<Vec<_>, _>(|(_, x)| *x);
+
+    let idents = idents
+        .into_iter()
+        .map(|(v, x)| {
+            if x {
+                v.to_string()
+            } else {
+                format!("self.{}", v)
+            }
+        })
+        .collect::<Vec<_>>();
+    let horizontal_idents = idents.iter().cloned().step_by(2).collect::<Vec<_>>();
+    let vertical_idents = idents
+        .iter()
+        .cloned()
+        .skip(1)
+        .step_by(2)
+        .collect::<Vec<_>>();
+
+    // [...,E,self.c,A]
+    let horizontal_idents_slice = horizontal_idents
+        .iter()
+        .rev()
+        .map(|v| format!("{},", v))
+        .collect::<String>();
+
+    // [const A:usize, const B:usize, ...]
+    let static_idents = static_idents
+        .into_iter()
+        .map(|(v, _)| format!(",const {}:usize", v))
+        .collect::<String>();
+
+    let idents_index = format!(
+        "[{}]",
+        (0..ndims)
+            .map(|v| format!("{},", lowercase(v)))
+            .collect::<String>()
+    );
+
+    let impl_block = format!(
+        "
+        impl<T: std::fmt::Display + std::fmt::Debug{static_idents}> std::fmt::Display for Tensor{ndims}{self_partial_type_suffix} {{
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{
+                let max_str_width = self.data
+                    .iter()
+                    .map(|v|v.to_string().chars().count())
+                    .max()
+                    .unwrap_or(0);
+                let (upper_bounds,lower_bounds) = display_bounds(&[{horizontal_idents_slice}],max_str_width);
+
+                let mut out = String::new();
+                {}
+                write!(f,\"\\n{{}}\",out)
+            }}
+        }}
+        ",
+        vertical_dimensions(
+            &vertical_idents,
+            &horizontal_idents,
+            idents_index,
+        )
+    );
+    output_string.push_str(&impl_block);
+
+    fn vertical_dimensions(
+        // [self.b,D,self.f,...].rev()
+        v_dims: &[String],
+        // [A,C,self.e,...].rev()
+        h_dims: &[String],
+        // "[a,b,c,d,e,f,...]"
+        index: String,
+    ) -> String {
+        // Assume in-order not reversed, h_dims=[A,self.c,E,...]
+        let mut outwards = format!(
+            "
+            out.push('│');
+            for a in 0..{} {{
+                out.push(' ');
+                let s = self[{index}].to_string();
+                let v = format!(\"{{}}{{}}\",\" \".repeat(max_str_width-s.chars().count()),s);
+                out.push_str(&v);
+            }}
+            out.push(' ');
+            out.push('│');
+            ",
+            h_dims[0]
+        );
+        for (dim, index) in h_dims.iter().zip((0..).step_by(2)).skip(1) {
+            let ident = lowercase(index);
+            outwards = format!(
+                "
+                out.push('│');
+                for {ident} in 0..{dim} {{
+                    {outwards}
+                }}
+                out.push('│');
+                "
+            );
+        }
+
+        let mut iter = v_dims.iter().zip((1..).step_by(2));
+
+        if let Some((first_dim, _)) = iter.next() {
+            outwards = format!(
+                "
+                for b in 0..{first_dim} {{
+                    {outwards}
+                    if b+1 < {first_dim} {{
+                        out.push('\\n');
+                    }}
+                }}
+                "
+            )
+        }
+        let mut bound_iter = (1..h_dims.len()).rev();
+        loop {
+            if let Some(next_bound) = bound_iter.next() {
+                outwards = format!(
+                    "
+                    out.push_str(&upper_bounds[{next_bound}]);
+                    out.push('\\n');
+                    {outwards}
+                    out.push('\\n');
+                    out.push_str(&lower_bounds[{next_bound}]);
+                    "
+                );
+            } else {
+                break;
+            }
+            if let Some((dim, index)) = iter.next() {
+                let ident = lowercase(index);
+                outwards = format!(
+                    "
+                    
+                    for {ident} in 0..{dim} {{
+                        {outwards}
+                        if {ident}+1 < {dim} {{
+                            out.push('\\n');
+                        }}
+                    }}
+                    "
+                );
+            }
+        }
+        outwards = format!(
+            "
+            out.push_str(&upper_bounds[0]);
+            out.push('\\n');
+            {outwards}
+            out.push('\\n');
+            out.push_str(&lower_bounds[0]);
+            "
+        );
+        // eprintln!("index: {}, outwards: {}",index,outwards);
+
+        outwards
+    }
+}
+fn blas(out: &mut String) {
+    // let a_dims = ['M','K'];
+    // let b_dims = ['K','N'];
+    // let c_dims = ['M','N'];
+
+    // [M,N,K]
+
+    // sgemv & dgemv
+
+    // sgemm & dgemm
+    // -------------------------------------------
+    for a_form in vec![(0..2), (0..2)].into_iter().multi_cartesian_product() {
+        let a_form = bool_vec(a_form);
+        let a_present = [a_form[0], false, a_form[1]];
+
+        let a_static_dims = a_form
+            .iter()
+            .map(|b| if *b { SDST } else { SDDT })
+            .intersperse(SDS)
+            .collect::<String>();
+        let a_const_generics = match (a_form[0], a_form[1]) {
+            (false, false) => "",
+            (true, false) => ",M",
+            (false, true) => ",K",
+            (true, true) => ",M,K",
+        };
+        let dgemm_a_type = format!("Matrix{a_static_dims}<f64{a_const_generics}>");
+        let sgemm_a_type = format!("Matrix{a_static_dims}<f32{a_const_generics}>");
+
+        for b_form in vec![(0..2), (0..2)].into_iter().multi_cartesian_product() {
+            let b_form = bool_vec(b_form);
+
+            // [M,N,K]
+            let b_present = [
+                a_present[0] || false,
+                a_present[1] || b_form[1],
+                a_present[2] || b_form[0],
+            ];
+
+            let b_static_dims = b_form
+                .iter()
+                .map(|b| if *b { SDST } else { SDDT })
+                .intersperse(SDS)
+                .collect::<String>();
+            let b_const_generics = match (b_form[0], b_form[1]) {
+                (false, false) => "",
+                (true, false) => ",K",
+                (false, true) => ",N",
+                (true, true) => ",K,N",
+            };
+            let dgemm_b_type = format!("Matrix{b_static_dims}<f64{b_const_generics}>");
+            let sgemm_b_type = format!("Matrix{b_static_dims}<f32{b_const_generics}>");
+
+            for c_form in vec![(0..2), (0..2)].into_iter().multi_cartesian_product() {
+                let c_form = bool_vec(c_form);
+
+                // [M,N,K]
+                let c_present = [
+                    b_present[0] || c_form[0],
+                    b_present[1] || c_form[1],
+                    b_present[2] || false,
+                ];
+
+                let c_static_dims = c_form
+                    .iter()
+                    .map(|b| if *b { SDST } else { SDDT })
+                    .intersperse(SDS)
+                    .collect::<String>();
+                let c_const_generics = match (c_form[0], c_form[1]) {
+                    (false, false) => "",
+                    (true, false) => ",M",
+                    (false, true) => ",N",
+                    (true, true) => ",M,N",
+                };
+                let sgemm_c_type = format!("Matrix{c_static_dims}<f32{c_const_generics}>");
+                let dgemm_c_type = format!("Matrix{c_static_dims}<f64{c_const_generics}>");
+
+                let mut defined_const_generics = String::new();
+                if c_present[0] {
+                    defined_const_generics.push_str("const M: usize,");
+                }
+                if c_present[1] {
+                    defined_const_generics.push_str("const N: usize,");
+                }
+                if c_present[2] {
+                    defined_const_generics.push_str("const K: usize,");
+                }
+
+                let sgemm_impl_str = format!(
+                    "
+                    impl<{defined_const_generics}> SGEMM<{sgemm_a_type},{sgemm_b_type},{sgemm_c_type}> 
+                    for BLAS {{
+                        fn sgemm(
+                            a: &{sgemm_a_type}, 
+                            b: &{sgemm_b_type}, 
+                            c: &mut {sgemm_c_type}, 
+                            alpha: f32, 
+                            beta: f32
+                        ) {{
+                            sgemm(false,false,{},{},{},alpha,beta,&a.data,&b.data,&mut c.data);
+                        }}
+                    }}
+                    ",
+                    if c_present[0] { "M" } else { "a.a" },
+                    if c_present[1] { "N" } else { "b.b" },
+                    if c_present[2] { "K" } else { "a.b" }
+                );
+                out.push_str(&sgemm_impl_str);
+                let dgemm_impl_str = format!(
+                    "
+                    impl<{defined_const_generics}> DGEMM<{dgemm_a_type},{dgemm_b_type},{dgemm_c_type}> 
+                    for BLAS {{
+                        fn dgemm(
+                            a: &{dgemm_a_type}, 
+                            b: &{dgemm_b_type}, 
+                            c: &mut {dgemm_c_type}, 
+                            alpha: f64, 
+                            beta: f64
+                        ) {{
+                            dgemm(false,false,{},{},{},alpha,beta,&a.data,&b.data,&mut c.data);
+                        }}
+                    }}
+                    ",
+                    if c_present[0] { "M" } else { "a.a" },
+                    if c_present[1] { "N" } else { "b.b" },
+                    if c_present[2] { "K" } else { "a.b" }
+                );
+                out.push_str(&dgemm_impl_str);
+            }
+        }
+    }
+}
 fn from(
     output_string: &mut String,
     // The number of dimensions of the tensors involved in the operation.
@@ -297,6 +718,165 @@ fn from(
     );
     output_string.push_str(&impl_block);
 }
+fn from_distribution(
+    output_string: &mut String,
+    // The number of dimensions of the tensors involved in the operation.
+    ndims: usize,
+    // A slice of length `ndims` defining whether each dimension is static (`true`) or dynamic (`false`).
+    self_dimensionality_form: &[bool],
+    self_partial_type_suffix: &str,
+) {
+    let (static_idents, dynamic_idents) = self_dimensionality_form
+        .iter()
+        .enumerate()
+        .map(|(v, x)| {
+            if *x {
+                ((v as u8 + 65) as char, *x)
+            } else {
+                ((v as u8 + 97) as char, *x)
+            }
+        })
+        .partition::<Vec<_>, _>(|(_, x)| *x);
+    let (static_idents, dynamic_idents) = (
+        static_idents
+            .into_iter()
+            .map(|(v, _)| v)
+            .collect::<Vec<_>>(),
+        dynamic_idents
+            .into_iter()
+            .map(|(v, _)| v)
+            .collect::<Vec<_>>(),
+    );
+
+    let dynamic_shape = (2..)
+        .take(dynamic_idents.len())
+        .map(|v| format!("{},", v))
+        .collect::<String>();
+    let static_shape = (2..)
+        .take(static_idents.len())
+        .map(|v| format!(",{}", v))
+        .collect::<String>();
+    let short_type_suffix = self_dimensionality_form
+        .iter()
+        .map(|x| match *x {
+            true => 'S',
+            false => 'D',
+        })
+        .intersperse('x')
+        .collect::<String>();
+
+    // Our full implementation block
+    let impl_block = format!(
+        "
+        impl<T{}> Tensor{ndims}{self_partial_type_suffix} {{
+            /// Constructs a tensor of a given shape with values sampled from a given distribution.
+            /// ```
+            /// use rand::distributions::{{Uniform,Standard}};
+            /// use tensor_lib::Tensor{ndims}{short_type_suffix};
+            /// let x = Tensor{ndims}{short_type_suffix}::<i32{static_shape}>::from_distribution(({dynamic_shape}Uniform::<i32>::from(0..10)));
+            /// let y = Tensor{ndims}{short_type_suffix}::<f32{static_shape}>::from_distribution(({dynamic_shape}Standard));
+            /// ```
+            pub fn from_distribution<DIST:rand::distributions::Distribution<T>>(({}distribution):({}DIST)) -> Self {{
+                let mut rng = rand::thread_rng();
+                Self {{ 
+                    {}
+                    data: distribution.sample_iter(&mut rng).take({}).collect()
+                }}
+            }}
+        }}
+        ",
+        static_idents
+            .iter()
+            .map(|v| format!(",const {}:usize", v))
+            .collect::<String>(),
+        dynamic_idents
+            .iter()
+            .map(|v| format!("{},", v))
+            .collect::<String>(),
+        "usize,".repeat(dynamic_idents.len()),
+        dynamic_idents
+            .iter()
+            .map(|v| format!("{},", v))
+            .collect::<String>(),
+        static_idents
+            .iter()
+            .chain(dynamic_idents.iter())
+            .intersperse(&'*')
+            .collect::<String>(),
+    );
+    output_string.push_str(&impl_block);
+}
+fn index(
+    output_string: &mut String,
+    // The number of dimensions of the tensors involved in the operation.
+    ndims: usize,
+    // A slice of length `ndims` defining whether each dimension is static (`true`) or dynamic (`false`).
+    self_dimensionality_form: &[bool],
+    self_partial_type_suffix: &str,
+) {
+    let idents = self_dimensionality_form
+        .iter()
+        .enumerate()
+        .map(|(v, x)| {
+            if *x {
+                (uppercase(v), *x)
+            } else {
+                (lowercase(v), *x)
+            }
+        })
+        .collect::<Vec<_>>();
+    let (static_idents, _) = idents.iter().cloned().partition::<Vec<_>, _>(|(_, x)| *x);
+    let idents = idents
+        .into_iter()
+        .map(|(v, x)| {
+            if x {
+                v.to_string()
+            } else {
+                format!("self.{}", v)
+            }
+        })
+        .collect::<Vec<_>>();
+    let static_idents = static_idents
+        .into_iter()
+        .map(|(v, _)| format!(",const {}:usize", v))
+        .collect::<String>();
+
+    let checks = (0..ndims)
+        .zip(idents.iter())
+        .map(|(i, x)| {
+            format!("assert!(arr[{i}]<{x},\"Given index on dimension {i} is out of bounds.\");\n")
+        })
+        .collect::<String>();
+    let index_sum = (0..ndims)
+        .map(|i| {
+            format!(
+                "arr[{i}]{}",
+                idents
+                    .iter()
+                    .rev()
+                    .skip(ndims - i)
+                    .map(|v| format!("*{}", v))
+                    .collect::<String>()
+            )
+        })
+        .intersperse(String::from("+"))
+        .collect::<String>();
+    // eprintln!("index_sum: {}",index_sum);
+
+    // Our full implementation block
+    let impl_block = format!(
+        "
+        impl<T:std::fmt::Debug{static_idents}> std::ops::Index<[usize;{ndims}]> for Tensor{ndims}{self_partial_type_suffix} {{
+            type Output = T;
+            fn index(&self,arr: [usize;{ndims}]) -> &Self::Output {{
+                {checks}
+                &self.data[{index_sum}]
+            }}
+        }}
+        "
+    );
+    output_string.push_str(&impl_block);
+}
 
 /// Shared functionality for some similar operations (e.g. `std::ops::SubAssign`, `std::ops::AddAssign`).
 fn assign_impl(
@@ -311,7 +891,7 @@ fn assign_impl(
     op_fn: &str,
 ) {
     for impl_form in (0..ndims).map(|_| (0..2)).multi_cartesian_product() {
-        let impl_form = impl_form.into_iter().map(|x| x != 0).collect::<Vec<_>>();
+        let impl_form = bool_vec(impl_form);
         // Defines whether each dimension in our output is static or not
         let join = self_dimensionality_form
             .iter()
@@ -321,7 +901,7 @@ fn assign_impl(
         // Getting the suffix for our rhs tensor based off whether each dimensions is static or not
         let impl_static_dimensions = impl_form
             .iter()
-            .map(|x| if *x { 'S' } else { 'D' })
+            .map(|x| if *x { SDST } else { SDDT })
             .intersperse(SDS)
             .collect::<String>();
         // Getting the const generics for our rhs tensor based off whether each dimension is static or not
@@ -400,7 +980,7 @@ fn standard_impl(
     op_fn: &str,
 ) {
     for impl_form in (0..ndims).map(|_| (0..2)).multi_cartesian_product() {
-        let impl_form = impl_form.into_iter().map(|x| x != 0).collect::<Vec<_>>();
+        let impl_form = bool_vec(impl_form);
         // Defines whether each dimension in our output is static or not
         let join = self_dimensionality_form
             .iter()
@@ -410,7 +990,7 @@ fn standard_impl(
         // Getting the suffix for our rhs tensor based off whether each dimensions is static or not
         let impl_static_dimensions = impl_form
             .iter()
-            .map(|x| if *x { 'S' } else { 'D' })
+            .map(|x| if *x { SDST } else { SDDT })
             .intersperse(SDS)
             .collect::<String>();
         // Getting the const generics for our rhs tensor based off whether each dimension is static or not
@@ -441,7 +1021,7 @@ fn standard_impl(
         let new_type_definition = format!(
             "{}<T{}>",
             join.iter()
-                .map(|x| if *x { 'S' } else { 'D' })
+                .map(|x| if *x { SDST } else { SDDT })
                 .intersperse(SDS)
                 .collect::<String>(),
             join.iter()
@@ -551,5 +1131,130 @@ fn standard_impl(
             ).collect::<String>(),
         );
         output_string.push_str(&impl_block);
+    }
+}
+/// Slicing implementations
+fn slice_impl(
+    output_string: &mut String,
+    // The number of dimensions of the tensors involved in the operation.
+    ndims: usize,
+    // A slice of length `ndims` defining whether each dimension is static (`true`) or dynamic (`false`).
+    self_dimensionality_form: &[bool],
+    static_dimensions: &str,
+    const_generics: &str,
+) {
+    // Iterates over all permutations of dynamic/static dimensions.
+    for impl_form in (0..ndims).map(|_| (0..2)).multi_cartesian_product() {
+        let impl_form = bool_vec(impl_form);
+
+        // output_string.push_str(&impl_block);
+        let const_dims = self_dimensionality_form
+            .iter()
+            .enumerate()
+            // Filter for only the static dimensions
+            .filter(|(_, b)| **b)
+            .map(|(v, _)| format!(",{}", uppercase(v)))
+            .collect::<String>();
+        let const_slice_ranges = impl_form
+            .iter()
+            .enumerate()
+            // Filter for only the static dimensions
+            .filter(|(_, b)| **b)
+            .map(|(v, _)| {
+                format!(
+                    "const {}{RANGE_SUFFIX}: std::ops::Range<usize>",
+                    uppercase(v)
+                )
+            })
+            .intersperse(String::from(","))
+            .collect::<String>();
+        let dynamic_slice_ranges = impl_form
+            .iter()
+            .enumerate()
+            // Filter for only the dynamic dimensions
+            .filter(|(_, b)| !**b)
+            .map(|(v, _)| format!(",{}{RANGE_SUFFIX}: std::ops::Range<usize>", lowercase(v)))
+            .collect::<String>();
+        let const_slice_sizes = impl_form
+            .iter()
+            .enumerate()
+            // Filter for only the static dimensions
+            .filter(|(_, b)| **b)
+            .map(|(v, _)| format!(",{{range_len({}{RANGE_SUFFIX})}}", uppercase(v)))
+            .collect::<String>();
+        // The contiguous lengths in our underlying vec of 1 unit along each dimension.
+        let idents = self_dimensionality_form
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                if *b {
+                    uppercase(i).to_string()
+                } else {
+                    format!("self.{}", lowercase(i))
+                }
+            })
+            .collect::<Vec<_>>();
+        let range_idents = impl_form
+            .iter()
+            .enumerate()
+            .map(|(i, b)| if *b { uppercase(i) } else { lowercase(i) })
+            .collect::<Vec<_>>();
+
+        let mut iter_str_start = String::new();
+        let mut iter_str_end = String::new();
+        for (i, ident) in range_idents.iter().enumerate() {
+            let mut size = idents
+                .iter()
+                .skip(i + 1)
+                .cloned()
+                .intersperse(String::from("*"))
+                .collect::<String>();
+            if size.is_empty() {
+                size = String::from("1");
+            }
+            let chunk_ident = lowercase(i);
+            iter_str_start.push_str(&format!(
+                "
+                .chunks_exact({size})
+                .skip({ident}{RANGE_SUFFIX}.start)
+                .take({ident}{RANGE_SUFFIX}.end-{ident}{RANGE_SUFFIX}.start)
+                .flat_map(|{chunk_ident}|{chunk_ident}"
+            ));
+            iter_str_end.push(')');
+        }
+        let iter_str = format!("self.data{iter_str_start}{iter_str_end}\n.collect::<Vec<_>>()");
+
+        let dynamic_idents = impl_form
+            .iter()
+            .zip(range_idents.iter())
+            .enumerate()
+            // Filter to dynamic components
+            .filter(|(_, (to, _))| !**to)
+            .map(|(v, (_, from))| {
+                let to = lowercase(v);
+                format!(",{to}:{from}{RANGE_SUFFIX}.end-{from}{RANGE_SUFFIX}.start")
+            })
+            .collect::<String>();
+
+        let impl_static_dimensions = impl_form
+            .iter()
+            .map(|b| if *b { SDST } else { SDDT })
+            .intersperse(SDS)
+            .collect::<String>();
+
+        let slice_impl = format!(
+            "
+            impl<T{const_generics}> Slice{ndims}{impl_static_dimensions}<T> for Tensor{ndims}{static_dimensions}<T{const_dims}> {{
+                fn slice<{const_slice_ranges}>(&self{dynamic_slice_ranges}) -> Tensor{ndims}{impl_static_dimensions}<&T{const_slice_sizes}> {{
+                    Tensor{ndims}{impl_static_dimensions}::<&T{const_slice_sizes}> {{
+                        data: {iter_str}
+                        {dynamic_idents}
+                    }}
+                }}
+            }}
+            "
+        );
+        // println!("slice_impl: {}",slice_impl);
+        output_string.push_str(&slice_impl);
     }
 }
