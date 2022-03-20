@@ -4,17 +4,17 @@
 #![feature(generic_const_exprs)]
 //! ## Dimensionality features
 //! To avoid unnecessarily including a huge quantity of code there are features for each step of
-//!  dimensionality. If you only need vectors and matrices then `d2` will provide these, if you 
-//!  need vectors matrices and 3d tensors then `d3` will provide this (`d3` is the current 
+//!  dimensionality. If you only need vectors and matrices then `d2` will provide these, if you
+//!  need vectors matrices and 3d tensors then `d3` will provide this (`d3` is the current
 //!  `default` feature), etc.
 //!
 //! It is important to note you only need to specify the feature for the highest dimensionality you
 //!  require. Enabling `d5` and `d3` is no different than only enabling `d5`.
-//! 
-//! Current support goes up to `d10`. I haven't tried anything past `d6`, the higher 
-//!  dimensionalities generate exponentially more code, it is quite possible `d10` generates many 
-//!  gigabytes of code and possibly simply breaks. I would highly recommended using `default` or 
-//!  the minimum dimensionality you can, otherwise you will find compile times become particularly 
+//!
+//! Current support goes up to `d10`. I haven't tried anything past `d6`, the higher
+//!  dimensionalities generate exponentially more code, it is quite possible `d10` generates many
+//!  gigabytes of code and possibly simply breaks. I would highly recommended using `default` or
+//!  the minimum dimensionality you can, otherwise you will find compile times become particularly
 //!  laborious.
 //! ## Examples
 //! ### Construction
@@ -171,8 +171,8 @@
 //! . ┌──5
 //! . │ ┌──3
 //!   6 │ ┌──1
-//!     4 │ 
-//!       2 
+//!     4 │
+//!       2
 //! ```
 //! The number corresponding to the dimensions, where for example in a `Tensor6SxSxSxSxSxS`, `A->1`, `B->2`, `C->3`, `D->4`, `E->5`, `F->6`.
 extern crate openblas_src;
@@ -211,7 +211,219 @@ tensors!(3);
 tensors!(2);
 
 /// Unit struct on which BLAS functionality is implemented. This allows for effective function overloading for the various permutations of vector/matrix/tensor shapes.
+///
+/// ### Support
+/// #### Level 1
+/// 
+/// Single|Double|Complex|Double Complex
+/// ---|---|---|---
+/// SSWAP|DSWAP||
+/// SSCAL|DSCAL||
+/// SCOPY|DCOPY||
+/// SAXPY|DAXPY||
+/// SDOT|DDOT||
+/// SNRM2|DNRM2||
+/// SASUM|DASUM||
+/// ISAMAX|IDAMAX||
+/// 
+/// #### Level 2
+/// 
+/// Single|Double|Complex|Double Complex
+/// ---|---|---|---
+/// 
+/// #### Level 3
+/// 
+/// Single|Double|Complex|Double Complex
+/// ---|---|---|---
+/// SGEMM|DGEMM||
+/// 
 pub struct BLAS();
+
+
+/// Defines tensors of generic shapes but specific types.
+pub trait Tensor<T> {
+    fn data(&self) -> &[T];
+    fn data_mut(&mut self) -> &mut [T];
+}
+// BLAS level 1
+// ---------------------------------------------------------------------------
+/// [SSWAP](http://www.netlib.org/lapack/explore-html/d9/da9/sswap_8f.html) BLAS operation.
+pub trait SSWAP<X,Y> {
+    fn sswap(x:&mut X, y: &mut Y);
+}
+/// [DSWAP](http://www.netlib.org/lapack/explore-html/db/dd4/dswap_8f.html) BLAS operation.
+pub trait DSWAP<X,Y> {
+    fn dswap(x:&mut X, y: &mut Y);
+}
+/// [SSCAL](http://www.netlib.org/lapack/explore-html/d9/d04/sscal_8f.html) BLAS operation.
+pub trait SSCAL<X> {
+    fn sscal(alpha:f32, x:&mut X);
+}
+/// [DSCAL](http://www.netlib.org/lapack/explore-html/de/da4/group__double__blas__level1_ga793bdd0739bbd0e0ec8655a0df08981a.html#ga793bdd0739bbd0e0ec8655a0df08981a) BLAS operation.
+pub trait DSCAL<X> {
+    fn dscal(alpha:f64, x:&mut X);
+}
+/// [SCOPY](http://www.netlib.org/lapack/explore-html/de/dc0/scopy_8f.html) BLAS operation.
+pub trait SCOPY<X,Y> {
+    fn scopy(x:&X, y: &mut Y);
+}
+/// [DCOPY](http://www.netlib.org/lapack/explore-html/alpha/d6c/dcopy_8f.html) BLAS operation.
+pub trait DCOPY<X,Y> {
+    fn dcopy(x:&X, y: &mut Y);
+}
+/// [SAXPY](http://www.netlib.org/lapack/explore-html/d8/daf/saxpy_8f.html) BLAS operation.
+pub trait SAXPY<X,Y> {
+    fn saxpy(alpha:f32, x:&X,y:&mut Y);
+}
+/// [DAXPY](http://www.netlib.org/lapack/explore-html/d9/dcd/daxpy_8f.html) BLAS operation.
+pub trait DAXPY<X,Y> {
+    fn daxpy(alpha:f64, x:&X, y: &mut Y);
+}
+/// [SDOT](http://www.netlib.org/lapack/explore-html/d0/d16/sdot_8f.html) BLAS operation.
+pub trait SDOT<X,Y> {
+    fn sdot(x:&X,y:&Y)->f32;
+}
+/// [DDOT](http://www.netlib.org/lapack/explore-html/d5/df6/ddot_8f.html) BLAS operation.
+pub trait DDOT<X,Y> {
+    fn ddot(x:&X, y: &Y)->f64;
+}
+/// [SASUM](http://www.netlib.org/lapack/explore-html/df/d1f/sasum_8f.html) BLAS operation.
+pub trait SASUM<X> {
+    fn sasum(x: &X) -> f32;
+}
+/// [DASUM](http://www.netlib.org/lapack/explore-html/de/d05/dasum_8f.html) BLAS operation.
+pub trait DASUM<X> {
+    fn dasum(x: &X) -> f64;
+}
+/// [SNRM2](https://www.netlib.org/lapack/explore-html/df/d28/group__single__blas__level1_gad179c1611098b5881f147d39afb009b8.html) BLAS operation.
+pub trait SNRM2<X> {
+    fn snrm2(x: &X) -> f32;
+}
+/// [DNRM2](http://www.netlib.org/lapack/explore-html/df/d28/group__single__blas__level1_gab5393665c8f0e7d5de9bd1dd2ff0d9d0.html) BLAS operation.
+pub trait DNRM2<X> {
+    fn dnrm2(x: &X) -> f64;
+}
+/// [ISAMAX](http://www.netlib.org/lapack/explore-html/d6/d44/isamax_8f.html) BLAS operation.
+pub trait ISAMAX<X> {
+    fn isamax(x: &X) -> usize;
+}
+/// [IDAMAX](http://www.netlib.org/lapack/explore-html/dd/de0/idamax_8f.html) BLAS operation.
+pub trait IDAMAX<X> {
+    fn idamax(x: &X) -> usize;
+}
+/// Internal wrapper around `cblas::sswap`.
+fn sswap(x: &mut[f32], y: &mut[f32]) {
+    assert_eq!(x.len(),y.len());
+    unsafe { cblas::sswap(x.len() as i32, x,1,y,1) }
+}
+/// Internal wrapper around `cblas::dswap`.
+fn dswap(x: &mut[f64], y: &mut[f64]) {
+    assert_eq!(x.len(),y.len());
+    unsafe { cblas::dswap(x.len() as i32, x,1,y,1) }
+}
+/// Internal wrapper around `cblas::sscal`
+fn sscal(alpha: f32, x: &mut[f32]) {
+    unsafe { cblas::sscal(x.len() as i32,alpha, x, 1) }
+}
+/// Internal wrapper around `cblas::dscal`.
+fn dscal(alpha:f64, x: &mut[f64]) {
+    unsafe { cblas::dscal(x.len() as i32,alpha, x, 1) }
+}
+/// Internal wrapper around `cblas::scopy`.
+fn scopy(x: &[f32], y: &mut[f32]) {
+    assert_eq!(x.len(),y.len());
+    unsafe { cblas::scopy(x.len() as i32, x,1,y,1) }
+}
+/// Internal wrapper around `cblas::dcopy`.
+fn dcopy(x: &[f64], y: &mut[f64]) {
+    assert_eq!(x.len(),y.len());
+    unsafe { cblas::dcopy(x.len() as i32, x,1,y,1) }
+}
+/// Internal wrapper around `cblas::saxpy`
+fn saxpy(alpha: f32, x: &[f32],y:&mut [f32]) {
+    unsafe { cblas::saxpy(x.len() as i32,alpha, x, 1,y,1) }
+}
+/// Internal wrapper around `cblas::daxpy`.
+fn daxpy(alpha:f64, x: &[f64],y:&mut [f64]) {
+    unsafe { cblas::daxpy(x.len() as i32,alpha, x, 1,y,1) }
+}
+/// Internal wrapper around `cblas::saxpy`
+fn sdot(x: &[f32],y:&[f32]) -> f32 {
+    unsafe { cblas::sdot(x.len() as i32, x, 1,y,1) }
+}
+/// Internal wrapper around `cblas::daxpy`.
+fn ddot(x: &[f64],y:&[f64]) -> f64 {
+    unsafe { cblas::ddot(x.len() as i32, x, 1,y,1) }
+}
+/// Internal wrapper around `cblas::sasum`
+fn sasum(x: &[f32]) -> f32 {
+    unsafe { cblas::sasum(x.len() as i32, x, 1) }
+}
+/// Internal wrapper around `cblas::dasum`.
+fn dasum(x: &[f64]) -> f64 {
+    unsafe { cblas::dasum(x.len() as i32, x, 1) }
+}
+/// Internal wrapper for `cblas::snrm2`.
+fn snrm2(x: &[f32]) -> f32 {
+    unsafe { cblas::snrm2(x.len() as i32, x, 1) }
+}
+/// Internal wrapper for `cblas::dnrm2`.
+fn dnrm2(x:&[f64]) -> f64 {
+    unsafe { cblas::dnrm2(x.len() as i32, x, 1) }
+}
+/// Internal wrapper for `cblas::isamax`.
+fn isamax(x: &[f32]) -> usize {
+    unsafe { cblas::isamax(x.len() as i32, x, 1) as usize } 
+}
+/// Internal wrapper for `cblas::idamax`.
+fn idamax(x:&[f64]) -> usize {
+    unsafe { cblas::idamax(x.len() as i32, x, 1) as usize } 
+}
+// It doesn't matter the shape of a tensor as long as its type is f32 or f64 we can do a variety of
+//  BLAS operations.
+// --------------------------------------
+impl<X:Tensor<f32>> SSCAL<X> for BLAS {
+    fn sscal(alpha:f32,x: &mut X) {
+        sscal(alpha,x.data_mut());
+    }
+}
+impl<X:Tensor<f64>> DSCAL<X> for BLAS {
+    fn dscal(alpha:f64,x: &mut X) {
+        dscal(alpha,x.data_mut());
+    }
+}
+impl<X:Tensor<f32>> SASUM<X> for BLAS {
+    fn sasum(x: &X) -> f32 {
+        sasum(x.data())
+    }
+}
+impl<X:Tensor<f64>> DASUM<X> for BLAS {
+    fn dasum(x: &X) -> f64 {
+        dasum(x.data())
+    }
+}
+impl<X:Tensor<f32>> SNRM2<X> for BLAS {
+    fn snrm2(x: &X) -> f32 {
+        snrm2(x.data())
+    }
+}
+impl<X:Tensor<f64>> DNRM2<X> for BLAS {
+    fn dnrm2(x: &X) -> f64 {
+        dnrm2(x.data())
+    }
+}
+impl<X:Tensor<f32>> ISAMAX<X> for BLAS {
+    fn isamax(x: &X) -> usize {
+        isamax(x.data())
+    }
+}
+impl<X:Tensor<f64>> IDAMAX<X> for BLAS {
+    fn idamax(x: &X) -> usize {
+        idamax(x.data())
+    }
+}
+// BLAS level 3
+// ---------------------------------------------------------------------------
 /// [DGEMM](http://www.netlib.org/lapack/explore-html/d1/d54/group__double__blas__level3_gaeda3cbd99c8fb834a60a6412878226e1.html) BLAS operation.
 pub trait DGEMM<A, B, C> {
     /// c = alpha * a@b + beta*c
@@ -222,48 +434,7 @@ pub trait SGEMM<A, B, C> {
     /// c = alpha * a@b + beta*c
     fn sgemm(a: &A, b: &B, c: &mut C, alpha: f32, beta: f32);
 }
-
-/// Internal function used for getting lengths of display strings for tensors.
-///
-/// We allow dead code since this *likely* isn't dead code it is used by implementations produced by our macro.
-#[allow(dead_code)]
-fn display_bounds(h_dims: &[usize], max_str_width: usize) -> (Vec<String>, Vec<String>) {
-    let lens = display_bound_lengths(h_dims, max_str_width);
-    return lens
-        .into_iter()
-        .rev()
-        .enumerate()
-        .map(|(i, len)| {
-            let border = "│".repeat(i);
-            let num = if i > 0 { h_dims[i - 1] } else { 1 };
-            let space = " ".repeat(len);
-            let up = format!("┌{}┐", space).repeat(num);
-            let down = format!("└{}┘", space).repeat(num);
-            (
-                format!("{}{}{}", border, up, border),
-                format!("{}{}{}", border, down, border),
-            )
-        })
-        .unzip::<_, _, Vec<_>, Vec<_>>();
-    fn display_bound_lengths(h_dims: &[usize], max_str_width: usize) -> Vec<usize> {
-        if h_dims.len() == 1 {
-            vec![h_dims[0] * (max_str_width + 1) + 1]
-        } else {
-            let mut temp = display_bound_lengths(&h_dims[1..], max_str_width);
-            let new_val = (temp[0] + 2) * h_dims[0];
-            temp.push(new_val);
-            temp
-        }
-    }
-}
-
-fn trans(x: bool) -> cblas::Transpose {
-    match x {
-        true => cblas::Transpose::Ordinary,
-        false => cblas::Transpose::None,
-    }
-}
-/// Internal convenience wrapper around `cblas::sgemm`.
+/// Internal wrapper around `cblas::sgemm`.
 fn sgemm(
     // If `true` then `op(a)=transpose(a)` else if `false` `op(a)=a`.
     trans_a: bool,
@@ -304,7 +475,7 @@ fn sgemm(
         );
     }
 }
-/// Internal convenience wrapper around `cblas::dgemm`.
+/// Internal wrapper around `cblas::dgemm`.
 fn dgemm(
     // If `true` then `op(a)=transpose(a)` else if `false` `op(a)=a`.
     trans_a: bool,
@@ -345,6 +516,47 @@ fn dgemm(
         );
     }
 }
+// ---------------------------------------------------------------------------
+
+/// Internal function used for getting lengths of display strings for tensors.
+fn display_bounds(h_dims: &[usize], max_str_width: usize) -> (Vec<String>, Vec<String>) {
+    let lens = display_bound_lengths(h_dims, max_str_width);
+    return lens
+        .into_iter()
+        .rev()
+        .enumerate()
+        .map(|(i, len)| {
+            let border = "│".repeat(i);
+            let num = if i > 0 { h_dims[i - 1] } else { 1 };
+            let space = " ".repeat(len);
+            let up = format!("┌{}┐", space).repeat(num);
+            let down = format!("└{}┘", space).repeat(num);
+            (
+                format!("{}{}{}", border, up, border),
+                format!("{}{}{}", border, down, border),
+            )
+        })
+        .unzip::<_, _, Vec<_>, Vec<_>>();
+    fn display_bound_lengths(h_dims: &[usize], max_str_width: usize) -> Vec<usize> {
+        if h_dims.len() == 1 {
+            vec![h_dims[0] * (max_str_width + 1) + 1]
+        } else {
+            let mut temp = display_bound_lengths(&h_dims[1..], max_str_width);
+            let new_val = (temp[0] + 2) * h_dims[0];
+            temp.push(new_val);
+            temp
+        }
+    }
+}
+
+fn trans(x: bool) -> cblas::Transpose {
+    match x {
+        true => cblas::Transpose::Ordinary,
+        false => cblas::Transpose::None,
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {

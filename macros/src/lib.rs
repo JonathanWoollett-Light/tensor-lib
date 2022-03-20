@@ -116,15 +116,16 @@ pub fn tensors(item: TokenStream) -> TokenStream {
                 .collect::<String>();
 
             let type_info_t = format!("{}<T{}>", static_dimensions, const_generics);
+            let static_type_dimensions = form.iter()
+                .enumerate()
+                // Filter for only the static dimensions
+                .filter(|(_, b)| **b)
+                .map(|(v, _)| format!(",{}", uppercase(v)))
+                .collect::<String>();
             let type_info = format!(
                 "{}<T{}>",
                 static_dimensions,
-                form.iter()
-                    .enumerate()
-                    // Filter for only the static dimensions
-                    .filter(|(_, b)| **b)
-                    .map(|(v, _)| format!(",{}", uppercase(v)))
-                    .collect::<String>()
+                static_type_dimensions
             );
 
             let mut features = if i <= 3 {
@@ -185,7 +186,7 @@ pub fn tensors(item: TokenStream) -> TokenStream {
                     }}
                     pub fn is_empty(&self) -> bool {{
                         self.data.is_empty()
-                    }}
+                    }}  
                 }}
                 ",
             );
@@ -196,6 +197,42 @@ pub fn tensors(item: TokenStream) -> TokenStream {
 
             // We push the alias string.
             out.push_str(&alias_string);
+
+            // We push specific type traits.
+            let f32_type = format!(
+                "{}<f32{}>",
+                static_dimensions,
+                static_type_dimensions
+            );
+            let f64_type = format!(
+                "{}<f64{}>",
+                static_dimensions,
+                static_type_dimensions
+            );
+            // Strips starting command from `const_generics` since we don't expect a `T` generic value to proceed its usage here.
+            let non_t_const_generics = if const_generics.is_empty() { &const_generics } else {
+                &const_generics[1..]
+            };
+            out.push_str(&format!(
+                "
+                impl<{non_t_const_generics}> Tensor<f32> for Tensor{i}{f32_type} {{
+                    fn data(&self) -> &[f32] {{
+                        &self.data
+                    }}
+                    fn data_mut(&mut self) -> &mut [f32] {{
+                        &mut self.data
+                    }}
+                }}
+                impl<{non_t_const_generics}> Tensor<f64> for Tensor{i}{f64_type} {{
+                    fn data(&self) -> &[f64] {{
+                        &self.data
+                    }}
+                    fn data_mut(&mut self) -> &mut [f64] {{
+                        &mut self.data
+                    }}
+                }}
+                "
+            ));
 
             // Slicing trait
             // --------------------------------------
@@ -240,8 +277,13 @@ pub fn tensors(item: TokenStream) -> TokenStream {
             // We push our slice trait
             out.push_str(&slice_trait_str);
 
-            // Implementations
+            // Atomic implementations
             // --------------------------------------
+            // Implementations which only depend on the type of `self`
+
+            blas_impl(&mut out, i, &form);
+            // Max value
+            max_impl(&mut out,i,&form,&type_info);
             // Display
             display_impl(&mut out, i, &form, &type_info);
             // From
@@ -522,6 +564,108 @@ fn display_impl(
         // eprintln!("index: {}, outwards: {}",index,outwards);
 
         outwards
+    }
+}
+fn blas_impl(
+    output_string: &mut String,
+    // The number of dimensions of the tensors involved in the operation.
+    ndims: usize,
+    // A slice of length `ndims` defining whether each dimension is static (`true`) or dynamic (`false`).
+    self_dimensionality_form: &[bool],
+) {
+    let const_dims = self_dimensionality_form
+        .iter()
+        .enumerate()
+        .filter_map(|(v, x)| x.then(|| uppercase(v)))
+        .collect::<Vec<_>>();
+    let const_generics = const_dims
+        .iter()
+        .map(|v| format!(", {}", v))
+        .collect::<String>();
+
+    let static_dims = self_dimensionality_form
+        .iter()
+        .map(|b| if *b { SDST } else { SDDT })
+        .intersperse(SDS)
+        .collect::<String>();
+
+    let single_type = format!("Tensor{ndims}{static_dims}<f32{const_generics}>");
+    let double_type = format!("Tensor{ndims}{static_dims}<f64{const_generics}>");
+    // eprintln!("single_type: {}",single_type);
+
+    for impl_form in (0..ndims).map(|_| (0..2)).multi_cartesian_product() {
+        let impl_form = bool_vec(impl_form);
+        // Defines all the static dimensions
+        let join = self_dimensionality_form.iter().zip(impl_form.iter()).map(|(a,b)|*a||*b).collect::<Vec<_>>();
+        let static_idents = join
+            .iter()
+            .enumerate()
+            .filter_map(|(v,b)| b.then(|| format!("const {}: usize, ", uppercase(v))))
+            .collect::<String>();
+        let impl_const_dims = impl_form
+            .iter()
+            .enumerate()
+            .filter_map(|(v, b)| b.then(|| uppercase(v)))
+        .collect::<Vec<_>>();
+        let impl_const_generics = impl_const_dims
+            .iter()
+            .map(|v| format!(", {}", v))
+            .collect::<String>();
+        let impl_static_dims = impl_form.iter()
+            .map(|b| if *b { SDST } else { SDDT })
+            .intersperse(SDS)
+            .collect::<String>();
+        let impl_single_type = format!("Tensor{ndims}{impl_static_dims}<f32{impl_const_generics}>");
+        let impl_double_type = format!("Tensor{ndims}{impl_static_dims}<f64{impl_const_generics}>");
+
+        // eprintln!("static_idents: {}, impl_single_type: {}",static_idents,impl_single_type);
+
+        
+        let impl_block = format!(
+            "
+            impl<{static_idents}> SSWAP<{single_type},{impl_single_type}> for BLAS {{
+                fn sswap(x: &mut {single_type}, y: &mut {impl_single_type}) {{
+                    sswap(&mut x.data, &mut y.data);
+                }}
+            }}
+            impl<{static_idents}> DSWAP<{double_type},{impl_double_type}> for BLAS {{
+                fn dswap(x: &mut {double_type}, y: &mut {impl_double_type}) {{
+                    dswap(&mut x.data, &mut y.data);
+                }}
+            }}
+            impl<{static_idents}> SCOPY<{single_type},{impl_single_type}> for BLAS {{
+                fn scopy(x: &{single_type}, y: &mut {impl_single_type}) {{
+                    scopy(&x.data, &mut y.data);
+                }}
+            }}
+            impl<{static_idents}> DCOPY<{double_type},{impl_double_type}> for BLAS {{
+                fn dcopy(x: &{double_type}, y: &mut {impl_double_type}) {{
+                    dcopy(&x.data, &mut y.data);
+                }}
+            }}
+            impl<{static_idents}> SAXPY<{single_type},{impl_single_type}> for BLAS {{
+                fn saxpy(alpha: f32, x: &{single_type}, y: &mut {impl_single_type}) {{
+                    saxpy(alpha, &x.data, &mut y.data);
+                }}
+            }}
+            impl<{static_idents}> DAXPY<{double_type},{impl_double_type}> for BLAS {{
+                fn daxpy(alpha:f64, x: &{double_type}, y: &mut {impl_double_type}) {{
+                    daxpy(alpha, &x.data, &mut y.data);
+                }}
+            }}
+            impl<{static_idents}> SDOT<{single_type},{impl_single_type}> for BLAS {{
+                fn sdot(x: &{single_type}, y: &{impl_single_type}) -> f32 {{
+                    sdot(&x.data, &y.data)
+                }}
+            }}
+            impl<{static_idents}> DDOT<{double_type},{impl_double_type}> for BLAS {{
+                fn ddot(x: &{double_type}, y: &{impl_double_type}) -> f64 {{
+                    ddot(&x.data, &y.data)
+                }}
+            }}
+            "
+        );
+        output_string.push_str(&impl_block);
     }
 }
 fn blas(out: &mut String) {
