@@ -13,7 +13,7 @@ openblas-src = "0.10.4"
 cblas = "0.4.0"
 
 [features]
-default = ["d3"]
+default = ["d2"]
 d1 = []
 d2 = ["d1"]
 d3 = ["d2","d1"]
