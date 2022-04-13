@@ -190,8 +190,8 @@
 //! let b = MatrixSxS::<_, 2, 1>::from(vec![5., 6.]);
 //! let c = MatrixSxS::<_, 1, 2>::from(vec![5., 6.]);
 //!
-//! let d1 = a1.join_b(b);
-//! let d2 = a2.join_a(c);
+//! let d1 = a1.join_b(b); // Joining along the 2nd dimension `b`
+//! let d2 = a2.join_a(c); // Joining along the first dimension `a`
 //!
 //! assert_eq!(d1, MatrixSxS::<_, 2, 3>::from(vec![1., 2., 3., 4., 5., 6.]));
 //! assert_eq!(d2, MatrixSxS::<_, 3, 2>::from(vec![1., 2., 5., 3., 4., 6.]));
