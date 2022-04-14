@@ -3,6 +3,12 @@
 #![feature(doc_cfg)]
 #![feature(adt_const_params)]
 #![feature(generic_const_exprs)]
+//!
+//! ## Note
+//! This library is an experiment pushing what can reasonably be achieved in this area, please keep that in mind.
+//! 
+//! I **highly** recommended simply including `#![feature(adt_const_params)]` and `#![feature(generic_const_exprs)]` by default when using this library.
+//! 
 //! ## Dimensionality features
 //! To avoid unnecessarily including a huge quantity of code there are features for each step of
 //!  dimensionality. If you only need vectors and matrices then `d2` will provide these, if you
@@ -25,18 +31,18 @@
 //! // Vectors
 //! let a = VectorD::<i32>::from((2,vec![1,2]));
 //! let b = VectorS::<i32,2>::from((vec![1,2]));
-//! // ┌─────┐
+//! // ┌     ┐
 //! // │ 1 2 │
-//! // └─────┘
+//! // └     ┘
 //! // Matrices
 //! let c = MatrixDxD::<i32>::from((2,3,vec![1,2,3,4,5,6]));
 //! let d = MatrixDxS::<i32,2>::from((3,vec![1,2,3,4,5,6]));
 //! let e = MatrixSxD::<i32,2>::from((3,vec![1,2,3,4,5,6]));
 //! let f = MatrixSxS::<i32,2,3>::from((vec![1,2,3,4,5,6]));
-//! // ┌───────┐
+//! // ┌       ┐
 //! // │ 1 2 3 │
 //! // │ 4 5 6 │
-//! // └───────┘
+//! // └       ┘
 //! // Tensors
 //! let g = Tensor3DxDxD::<i32>::from((2,3,2,vec![1,2,3,4,5,6,7,8,9,10,11,12]));
 //! let h = Tensor3DxDxS::<i32,2>::from((2,3,vec![1,2,3,4,5,6,7,8,9,10,11,12]));
@@ -45,14 +51,16 @@
 //! let k = Tensor3DxSxS::<i32,3,2>::from((2,vec![1,2,3,4,5,6,7,8,9,10,11,12]));
 //! let l = Tensor3SxSxD::<i32,2,3>::from((2,vec![1,2,3,4,5,6,7,8,9,10,11,12]));
 //! let m = Tensor3SxSxS::<i32,2,3,2>::from((vec![1,2,3,4,5,6,7,8,9,10,11,12]));
-//! // ┌──────────┐
-//! // │  1  2  3 │
-//! // │  4  5  6 │   
-//! // └──────────┘
-//! // ┌──────────┐
-//! // │  7  8  9 │
-//! // │ 10 11 12 │
-//! // └──────────┘
+//! // ┌            ┐
+//! // │┌          ┐│
+//! // ││  1  2  3 ││
+//! // ││  4  5  6 ││  
+//! // │└          ┘│
+//! // │┌          ┐│
+//! // ││  7  8  9 ││
+//! // ││ 10 11 12 ││
+//! // │└          ┘│
+//! // └            ┘
 //! ```
 //! ```ignore
 //! use rand::distributions::{Uniform, Standard};
@@ -114,6 +122,9 @@
 //! let a = VectorD::<i32>::from((2,vec![1,2]));
 //! assert_eq!(Slice1S::slice::<{0..2}>(&a), VectorS::<&i32,2>::from((vec![&1,&2])));
 //! let b = MatrixDxD::<i32>::from((2,3,vec![1,2,3,4,5,6]));
+//! // Since `.slice::<{0..1}>(a,0..3)` could mean slicing the 1st dimension statically and 2nd 
+//! // dimensional dynamically or vice-versa, we have to specify the format via specifying the 
+//! // trait. This is awkward but unavoidable when offering this functionality.
 //! assert_eq!(Slice2SxD::slice::<{0..1}>(&b,0..3), MatrixSxD::<&i32,1>::from((3,vec![&1,&2,&3])));
 //! ```
 //! ### BLAS
@@ -190,8 +201,8 @@
 //! let b = MatrixSxS::<_, 2, 1>::from(vec![5., 6.]);
 //! let c = MatrixSxS::<_, 1, 2>::from(vec![5., 6.]);
 //!
-//! let d1 = a1.join_b(b); // Joining along the 2nd dimension `b`
-//! let d2 = a2.join_a(c); // Joining along the first dimension `a`
+//! let d1 = a1.join2(b); // Joining along the 2nd dimension
+//! let d2 = a2.join1(c); // Joining along the 1st dimension
 //!
 //! assert_eq!(d1, MatrixSxS::<_, 2, 3>::from(vec![1., 2., 3., 4., 5., 6.]));
 //! assert_eq!(d2, MatrixSxS::<_, 3, 2>::from(vec![1., 2., 5., 3., 4., 6.]));
@@ -199,6 +210,7 @@
 
 extern crate openblas_src;
 use tensor_lib_macros::tensors;
+
 
 /// Internal function for getting the length of a `usize` range.
 pub const fn range_len(x: std::ops::Range<usize>) -> usize {
@@ -442,16 +454,19 @@ impl<X: Tensor<f64>> IDAMAX<X> for BLAS {
 // BLAS level 3
 // ---------------------------------------------------------------------------
 /// [DGEMM](http://www.netlib.org/lapack/explore-html/d1/d54/group__double__blas__level3_gaeda3cbd99c8fb834a60a6412878226e1.html) BLAS operation.
+#[cfg(feature="d2")]
 pub trait DGEMM<A, B, C> {
     /// c = alpha * a@b + beta*c
     fn dgemm(a: &A, b: &B, c: &mut C, alpha: f64, beta: f64);
 }
 /// [SGEMM](http://www.netlib.org/lapack/explore-html/db/dc9/group__single__blas__level3_gafe51bacb54592ff5de056acabd83c260.html) BLAS operation.
+#[cfg(feature="d2")]
 pub trait SGEMM<A, B, C> {
     /// c = alpha * a@b + beta*c
     fn sgemm(a: &A, b: &B, c: &mut C, alpha: f32, beta: f32);
 }
 /// Internal wrapper around `cblas::sgemm`.
+#[cfg(feature="d2")]
 #[allow(clippy::too_many_arguments)]
 fn sgemm(
     // If `true` then `op(a)=transpose(a)` else if `false` `op(a)=a`.
@@ -494,6 +509,7 @@ fn sgemm(
     }
 }
 /// Internal wrapper around `cblas::dgemm`.
+#[cfg(feature="d2")]
 #[allow(clippy::too_many_arguments)]
 fn dgemm(
     // If `true` then `op(a)=transpose(a)` else if `false` `op(a)=a`.
@@ -759,8 +775,8 @@ mod tests {
             let b = MatrixSxS::<_, 2, 1>::from(vec![5., 6.]);
             let c = MatrixSxS::<_, 1, 2>::from(vec![5., 6.]);
 
-            let d1 = a1.join_b(b);
-            let d2 = a2.join_a(c);
+            let d1 = a1.join2(b);
+            let d2 = a2.join1(c);
 
             assert_eq!(d1, MatrixSxS::<_, 2, 3>::from(vec![1., 2., 3., 4., 5., 6.]));
             assert_eq!(d2, MatrixSxS::<_, 3, 2>::from(vec![1., 2., 5., 3., 4., 6.]));
@@ -775,9 +791,9 @@ mod tests {
             let b: Tensor3<u32, 1, 2, 2> = Tensor3::new(vec![1, 2, 3, 4]);
             let c: Tensor3<u32, 2, 1, 2> = Tensor3::new(vec![1, 2, 3, 4]);
             let d: Tensor3<u32, 2, 2, 1> = Tensor3::new(vec![1, 2, 3, 4]);
-            let _e1 = a1.join_a(b);
-            let _e2 = a2.join_b(c);
-            let _e3 = a3.join_c(d);
+            let _e1 = a1.join1(b);
+            let _e2 = a2.join2(c);
+            let _e3 = a3.join3(d);
         }
     }
 }

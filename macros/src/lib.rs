@@ -29,6 +29,8 @@ const SDDT: &str = "D";
 
 const RANGE_SUFFIX: &str = "_range";
 
+const DEFAULT_LEVEL: usize = 2;
+
 /// Use this to avoid noise from `assert_eq!` expansion.
 const ASSERT_EQ: &str = "assert_eq!";
 const LOWERCASE_OFFSET: u8 = 97;
@@ -65,10 +67,9 @@ pub fn tensors(item: TokenStream) -> TokenStream {
             pub trait Join{i}<T> {{
                 type Output;
                 #[doc=\"Joins `self` and `rhs` along dimension {i} forming `Self::Output`.\"]
-                fn join_{}(self, rhs: T)-> Self::Output;
+                fn join{i}(self, rhs: T)-> Self::Output;
             }}
-            ",
-            lowercase(i - 1)
+            "
         );
         out.push_str(&join_trait);
 
@@ -138,7 +139,7 @@ pub fn tensors(item: TokenStream) -> TokenStream {
                 .collect::<String>();
             let type_info = format!("{}<T{}>", static_dimensions, static_type_dimensions);
 
-            let mut features = if i <= 3 {
+            let mut features = if i <= DEFAULT_LEVEL {
                 String::from("feature=\"default\",")
             } else {
                 String::new()
@@ -154,7 +155,6 @@ pub fn tensors(item: TokenStream) -> TokenStream {
             let alias_string = if i == 1 {
                 format!(
                     "
-                    #[doc(cfg(any({features})))]
                     #[doc=\"An alias for a `[{}]` 1 dimensional tensor.\"]
                     pub type Vector{} = Tensor1{};",
                     rustdoc_dims, type_info_t, type_info
@@ -162,7 +162,6 @@ pub fn tensors(item: TokenStream) -> TokenStream {
             } else if i == 2 {
                 format!(
                     "
-                    #[doc(cfg(any({features})))]
                     #[doc=\"An alias for a `[{}]` 2 dimensional tensor.\"]
                     pub type Matrix{} = Tensor2{};
                     ",
@@ -177,7 +176,6 @@ pub fn tensors(item: TokenStream) -> TokenStream {
             #[allow(unstable_name_collisions)]
             let struct_string = format!(
                 "
-                #[doc(cfg(any({features})))]
                 #[doc=\"{i}d tensor with `[{rustdoc_dims}]` dimensions.\n\n`self.data` contains the underlying data.\n\nIf present the properties `a`, `b`, `c`, etc. represent the lengths of dimensions `0`, `1`, `2`, etc.\"]
                 #[derive(Eq,PartialEq,Debug,Clone)]
                 pub struct Tensor{i}{static_dimensions}<T{const_generics}>{{ pub data: Vec<T>, {dynamic_dimensions} }}
@@ -268,8 +266,6 @@ pub fn tensors(item: TokenStream) -> TokenStream {
                 .collect::<String>();
             let slice_trait_str = format!(
                 "
-                #[cfg(feature = \"d{i}\")]
-                #[doc(cfg(any({features})))]
                 #[doc=\"Support for slicing a {i}d tensor by `[{rustdoc_dims}]` ranges.\"]
                 pub trait Slice{i}{static_dimensions}<T> {{
                     fn slice<{const_slice_ranges}>(&self{dynamic_slice_ranges}) -> Tensor{i}{static_dimensions}<&T{const_slice_sizes}>;
@@ -779,7 +775,7 @@ fn join_impl(
                 "
                 impl<T:Clone{joined_const_generics}> Join{}<{rhs_definition}> for Tensor{ndims}{self_partial_type_suffix} {where_constraints} {{
                     type Output = {out_definition};
-                    fn join_{}(self, rhs: {rhs_definition}) -> Self::Output {{
+                    fn join{}(self, rhs: {rhs_definition}) -> Self::Output {{
                         {checks}
                         Self::Output {{
                             data: self
@@ -794,7 +790,7 @@ fn join_impl(
                 }}
                 ",
                 i+1,
-                lowercase(i)
+                i+1
             );
             // eprintln!("impl_block: {}",impl_block);
             // eprintln!("impl_block: {}",impl_block);
