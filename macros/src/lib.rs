@@ -151,7 +151,7 @@ pub fn tensors(item: TokenStream) -> TokenStream {
                     .collect::<String>(),
             );
 
-            // The potential alias for this tensor.
+            // The low dimensionality linear algebra specific functionality
             let alias_string = if i == 1 {
                 format!(
                     "
@@ -162,10 +162,12 @@ pub fn tensors(item: TokenStream) -> TokenStream {
             } else if i == 2 {
                 format!(
                     "
-                    #[doc=\"An alias for a `[{}]` 2 dimensional tensor.\"]
-                    pub type Matrix{} = Tensor2{};
-                    ",
-                    rustdoc_dims, type_info_t, type_info
+                    #[doc=\"An alias for a `[{rustdoc_dims}]` 2 dimensional tensor.\"]
+                    pub type Matrix{type_info_t} = Tensor2{type_info};
+                    #[doc=\"Transposed 2d tensor with `[{rustdoc_dims}]` dimensions.\"]
+                    #[derive(Debug,Clone)]
+                    pub struct Transpose{type_info_t}(pub Tensor2{type_info});
+                    "
                 )
             } else {
                 String::new()
@@ -192,8 +194,22 @@ pub fn tensors(item: TokenStream) -> TokenStream {
                     pub fn is_empty(&self) -> bool {{
                         self.data.is_empty()
                     }}
+                    {}
                 }}
-                "
+                ", if i==2 {
+                    // eprintln!("type_info: {}",type_info);
+                    // let trans = format!("");
+                    // eprintln!("trans: {}",trans);
+                    format!(
+                        "
+                        pub fn transpose(self) -> Transpose{type_info} {{
+                            Transpose{static_dimensions}(self)
+                        }}
+                        "
+                    )
+                } else {
+                    String::new()
+                }
             );
 
             // We push the struct definition.
@@ -798,6 +814,7 @@ fn join_impl(
         }
     }
 }
+/// Generates simple blas implementations
 fn blas_impl(
     output_string: &mut String,
     // The number of dimensions of the tensors involved in the operation.
@@ -904,6 +921,7 @@ fn blas_impl(
         output_string.push_str(&impl_block);
     }
 }
+/// Generate complex blas implementations
 fn blas(out: &mut String) {
     // let a_dims = ['M','K'];
     // let b_dims = ['K','N'];
