@@ -975,6 +975,45 @@ fn blas(out: &mut String) {
             let dgemm_b_type = format!("Matrix{b_static_dims}<f64{b_const_generics}>");
             let sgemm_b_type = format!("Matrix{b_static_dims}<f32{b_const_generics}>");
 
+            {
+                let defined_const_generics = {
+                    let mut temp = String::new();
+                    if b_present[0] {
+                        temp.push_str("const M: usize,");
+                    }
+                    if b_present[1] {
+                        temp.push_str("const N: usize,");
+                    }
+                    if b_present[2] {
+                        temp.push_str("const K: usize,");
+                    }
+                    temp
+                };
+                let c_static_dims = [b_present[0], b_present[1]]
+                    .iter()
+                    .map(|b| if *b { SDST } else { SDDT })
+                    .intersperse(SDS)
+                    .collect::<String>();
+                let c_const_generics = match (b_present[0], b_present[1]) {
+                    (false, false) => "",
+                    (true, false) => ",M",
+                    (false, true) => ",N",
+                    (true, true) => ",M,N",
+                };
+                let matmul_impl = format!(
+                    "
+                    impl<T: std::ops::Mul<Output=T>,{defined_const_generics}> Matrix{a_static_dims}<T{a_const_generics}> {{
+                        pub fn matmul(&self,rhs: Matrix{b_static_dims}<T{b_const_generics}>) -> Matrix{c_static_dims}<T{c_const_generics}> {{
+                            unimplemented!()
+                        }}
+                    }}
+                    "
+                );
+                // eprintln!("matmul_impl: {}",matmul_impl);
+                out.push_str(&matmul_impl);
+            }
+            
+
             for c_form in vec![(0..2), (0..2)].into_iter().multi_cartesian_product() {
                 let c_form = bool_vec(c_form);
 
@@ -999,16 +1038,20 @@ fn blas(out: &mut String) {
                 let sgemm_c_type = format!("Matrix{c_static_dims}<f32{c_const_generics}>");
                 let dgemm_c_type = format!("Matrix{c_static_dims}<f64{c_const_generics}>");
 
-                let mut defined_const_generics = String::new();
-                if c_present[0] {
-                    defined_const_generics.push_str("const M: usize,");
-                }
-                if c_present[1] {
-                    defined_const_generics.push_str("const N: usize,");
-                }
-                if c_present[2] {
-                    defined_const_generics.push_str("const K: usize,");
-                }
+                let defined_const_generics = {
+                    let mut temp = String::new();
+                    if c_present[0] {
+                        temp.push_str("const M: usize,");
+                    }
+                    if c_present[1] {
+                        temp.push_str("const N: usize,");
+                    }
+                    if c_present[2] {
+                        temp.push_str("const K: usize,");
+                    }
+                    temp
+                };
+                
 
                 let sgemm_impl_str = format!(
                     "

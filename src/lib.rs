@@ -796,4 +796,15 @@ mod tests {
             let _e3 = a3.join3(d);
         }
     }
+    #[test]
+    fn usage() {
+        #[cfg(feature = "d2")]
+        {
+            let a = MatrixSxS::<_,3,3>::from(vec![1.,2.,3.,4.,5.,6.,7.,8.,9.]);
+            let b = MatrixSxS::<_,3,2>::from(vec![1.,2.,3.,4.,5.,6.]);
+            let mut c = MatrixSxS::<_,3,2>::from(vec![1.,1.,1.,1.,1.,1.]);
+            BLAS::sgemm(&a,&b,&mut c,1.,1.);
+            println!("c: {}",c);
+        }
+    }
 }
