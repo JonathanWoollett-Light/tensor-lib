@@ -1,0 +1,36 @@
+name: Update docs
+
+on:
+  push:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Cache target
+      uses: actions/cache@v3
+      with:
+        key: build
+        path: |
+          ./target
+    - name: Re-generate rustdoc
+      run: |
+        rustup install nightly
+        RUSTDOCFLAGS="--enable-index-page -Zunstable-options" cargo +nightly doc
+        mv ./target/doc ./
+    - name: Push updated docs
+      run: |
+        git config --global user.name github-actions[bot]
+        git config --global user.email github-actions[bot]@users.noreply.github.com
+        git add ./ci/doc/*
+        git commit -a -m "Updated rustdoc"
+        git push
