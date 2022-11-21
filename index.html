@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+        <title>testing-setup</title>
+    </head>
+    <body>
+    	<h3>testing-setup</h3>
+        <h2 id="description"></h2>
+        <ul>
+        	<li><a href="./doc/index.html">Documentation</a></li>
+        <ul>
+    </body>
+    <script>
+    	fetch("https://api.github.com/repos/JonathanWoollett-Light/tensor-lib")
+    		.then(response => response.json())
+    		.then(data => {
+    			document.getElementById("description").innerHTML = data.description;
+    		})
+    	
+    </script>
+</html>
