@@ -10,7 +10,7 @@ When performing the addition of a MatrixDxS (a matrix with a known number of col
 
 An example of how types will propagate through a program:
 
-```
+```rust
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 use tensor_lib::*;
