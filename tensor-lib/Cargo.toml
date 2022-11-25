@@ -1,0 +1,29 @@
+[package]
+name = "tensor-lib"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tensor-lib-macros = { path = "../tensor-lib-macros" }
+rand = "0.8.5"
+# BLAS Support
+openblas-src = {version = "0.10.5", features=["static"] }
+cblas = "0.4.0"
+
+[features]
+default = ["d2"]
+d1 = []
+d2 = ["d1"]
+d3 = ["d2","d1"]
+d4 = ["d3","d2","d1"]
+d5 = ["d4","d3","d2","d1"]
+d6 = ["d5","d4","d3","d2","d1"]
+d7 = ["d6","d5","d4","d3","d2","d1"]
+d8 = ["d7","d6","d5","d4","d3","d2","d1"]
+d9 = ["d8","d7","d6","d5","d4","d3","d2","d1"]
+d10 = ["d9","d8","d7","d6","d5","d4","d3","d2","d1"]
+
+[package.metadata."docs.rs"]
+all-features = true

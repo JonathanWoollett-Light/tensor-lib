@@ -1,5 +1,4 @@
 #![allow(unstable_name_collisions)]
-#![feature(format_args_capture)]
 
 extern crate proc_macro;
 use proc_macro::TokenStream;
