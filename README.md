@@ -1,6 +1,6 @@
 # Tensor-Lib
 
-[![docs](https://img.shields.io/badge/docs-latest-blue)](https://jonathanwoollett-light.github.io/tensor-lib/doc/tensor-lib/index.html)
+[![docs](https://img.shields.io/badge/docs-latest-blue)](https://jonathanwoollett-light.github.io/tensor-lib/doc/tensor_lib/index.html)
 
 A fast minimal ultra type safe linear algebra library.
 
