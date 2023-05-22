@@ -28,6 +28,7 @@ jobs:
         rustup install nightly
         cargo +nightly doc --package tensor-lib
         rm -rf ./doc
+        rm ./target/doc/.lock
         mv ./target/doc ./
 
     - name: Push updated docs
