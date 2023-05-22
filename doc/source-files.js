@@ -13,7 +13,7 @@ var sourcesIndex = JSON.parse('{\
 "rand":["",[["distributions",[],["bernoulli.rs","distribution.rs","float.rs","integer.rs","mod.rs","other.rs","slice.rs","uniform.rs","utils.rs","weighted.rs","weighted_index.rs"]],["rngs",[["adapter",[],["mod.rs","read.rs","reseeding.rs"]]],["mock.rs","mod.rs","std.rs","thread.rs"]],["seq",[],["index.rs","mod.rs"]]],["lib.rs","prelude.rs","rng.rs"]],\
 "rand_chacha":["",[],["chacha.rs","guts.rs","lib.rs"]],\
 "rand_core":["",[],["block.rs","error.rs","impls.rs","le.rs","lib.rs","os.rs"]],\
-"tensor_lib":["",[],["lib.rs"]],\
+"tensor_lib":["",[],["blas.rs","lib.rs","matmul.rs"]],\
 "tensor_lib_macros":["",[],["lib.rs"]]\
 }');
 createSourceSidebar();

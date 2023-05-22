@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"macro":[["tensors",""]]};
+window.SIDEBAR_ITEMS = {"macro":["tensors"]};
