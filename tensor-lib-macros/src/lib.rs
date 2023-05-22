@@ -1,7 +1,7 @@
 #![allow(unstable_name_collisions)]
+#![feature(proc_macro_diagnostic)]
 
 extern crate proc_macro;
-use proc_macro::TokenStream;
 
 use itertools::Itertools;
 
@@ -44,17 +44,32 @@ fn uppercase(x: usize) -> char {
 }
 
 #[proc_macro]
-pub fn tensors(item: TokenStream) -> TokenStream {
+pub fn tensors(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // The number of dimensions to define structs up to
     let dimensions = match item.into_iter().next().unwrap() {
-        proc_macro::TokenTree::Literal(n) => n.to_string().parse::<usize>().unwrap(),
-        _ => unreachable!(),
+        proc_macro::TokenTree::Literal(n) => {
+            let dims = n.to_string().parse::<usize>().unwrap();
+            if dims > 24 {
+                proc_macro::Diagnostic::spanned(
+                    n.span(),
+                    proc_macro::Level::Error,
+                    "Notation only allows dimensions up to 25 (A-Z)",
+                )
+                .emit();
+                return proc_macro::TokenStream::new();
+            }
+            dims
+        }
+        x => {
+            proc_macro::Diagnostic::spanned(
+                x.span(),
+                proc_macro::Level::Error,
+                "Expected the number of dimensions",
+            )
+            .emit();
+            return proc_macro::TokenStream::new();
+        }
     };
-    // eprintln!("dimensions: {}", dimensions);
-    assert!(
-        dimensions < 25,
-        "Notation only allows dimensions up to 25 (A-Z)"
-    );
 
     let mut out = String::new();
     blas(&mut out);
@@ -181,24 +196,9 @@ pub fn tensors(item: TokenStream) -> TokenStream {
                 #[derive(Eq,PartialEq,Debug,Clone)]
                 pub struct Tensor{i}{static_dimensions}<T{const_generics}>{{ pub data: Vec<T>, {dynamic_dimensions} }}
                 impl<T{const_generics}> Tensor{i}{type_info}{{
-                    pub fn iter(&self) -> impl Iterator<Item=&T> {{
-                        self.data.iter()
-                    }}
-                    pub fn iter_mut(&mut self) -> impl Iterator<Item=&mut T> {{
-                        self.data.iter_mut()
-                    }}
-                    pub fn len(&self) -> usize {{
-                        self.data.len()
-                    }}
-                    pub fn is_empty(&self) -> bool {{
-                        self.data.is_empty()
-                    }}
                     {}
                 }}
                 ", if i==2 {
-                    // eprintln!("type_info: {}",type_info);
-                    // let trans = format!("");
-                    // eprintln!("trans: {}",trans);
                     format!(
                         "
                         pub fn transpose(self) -> Transpose{type_info} {{
@@ -974,45 +974,6 @@ fn blas(out: &mut String) {
             let dgemm_b_type = format!("Matrix{b_static_dims}<f64{b_const_generics}>");
             let sgemm_b_type = format!("Matrix{b_static_dims}<f32{b_const_generics}>");
 
-            {
-                let defined_const_generics = {
-                    let mut temp = String::new();
-                    if b_present[0] {
-                        temp.push_str("const M: usize,");
-                    }
-                    if b_present[1] {
-                        temp.push_str("const N: usize,");
-                    }
-                    if b_present[2] {
-                        temp.push_str("const K: usize,");
-                    }
-                    temp
-                };
-                let c_static_dims = [b_present[0], b_present[1]]
-                    .iter()
-                    .map(|b| if *b { SDST } else { SDDT })
-                    .intersperse(SDS)
-                    .collect::<String>();
-                let c_const_generics = match (b_present[0], b_present[1]) {
-                    (false, false) => "",
-                    (true, false) => ",M",
-                    (false, true) => ",N",
-                    (true, true) => ",M,N",
-                };
-                let matmul_impl = format!(
-                    "
-                    impl<T: std::ops::Mul<Output=T>,{defined_const_generics}> Matrix{a_static_dims}<T{a_const_generics}> {{
-                        pub fn matmul(&self,rhs: Matrix{b_static_dims}<T{b_const_generics}>) -> Matrix{c_static_dims}<T{c_const_generics}> {{
-                            unimplemented!()
-                        }}
-                    }}
-                    "
-                );
-                // eprintln!("matmul_impl: {}",matmul_impl);
-                out.push_str(&matmul_impl);
-            }
-            
-
             for c_form in vec![(0..2), (0..2)].into_iter().multi_cartesian_product() {
                 let c_form = bool_vec(c_form);
 
@@ -1050,7 +1011,6 @@ fn blas(out: &mut String) {
                     }
                     temp
                 };
-                
 
                 let sgemm_impl_str = format!(
                     "

@@ -22,12 +22,14 @@ jobs:
         key: build
         path: |
           ./target
+          
     - name: Re-generate rustdoc
       run: |
         rustup install nightly
-        RUSTDOCFLAGS="--enable-index-page -Zunstable-options" cargo +nightly doc
+        cargo +nightly doc --package tensor-lib
         rm -rf ./doc
         mv ./target/doc ./
+
     - name: Push updated docs
       run: |
         git config --global user.name github-actions[bot]
