@@ -30,3 +30,14 @@ let f = d.add_columns(e);
 In this example the only operations which cannot be fully checked at compile time are:
 1. `a.clone() + b.clone()`
 2. `d.add_columns(e)`
+
+
+## Installation
+
+As this library utilise BLAS by default, on Linux it requires:
+
+```
+sudo apt-get install gfortran
+```
+
+I have not tested it on any platform outside Linux.
